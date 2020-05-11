@@ -1,3 +1,4 @@
+import numpy as np
 import pandas as pd
 import baostock as bs
 
@@ -14,15 +15,19 @@ def get_all_stock_code(date):
     return stock_df
 
 
-def get_stock_data(stock_codes, start_date, end_date, fields, save_path):
-    # 获取指定日期的指数、股票数据
+def get_stock_data(stock_code_df, start_date, end_date, fields, save_path):
+# 获取指定日期的指数、股票数据
     data_df = pd.DataFrame()
+    stock_codes = stock_code_df.code.to_list()
     for i, code in enumerate(stock_codes):
         if i % 500 == 0:
             print("Downloading :" + code)
         k_rs = bs.query_history_k_data_plus(code, fields, start_date, end_date)
         data_df = data_df.append(k_rs.get_data())
-    data_df.to_csv(save_path, encoding="gbk", index=False)
+    data_df = data_df.merge(stock_code_df[['code', 'code_name']], on=['code'], how='left')
+    if save_path:
+        data_df.to_csv(save_path, encoding="utf-8", index=False)
+        print('data saved')
     return data_df
 
 
@@ -45,6 +50,36 @@ def create_statistic_for_data(data, stat_window_size_list = [1, 2, 3, 5, 7, 14, 
             if k != 1:
                 # 2. rolling mean of price in window size k
                 data[f'ma_{k}_{price_col}'] = data[price_col][::-1].rolling(k).mean().sort_index() # calculate the moving average of the past, not the future, so reverse the data first
+    return data
+
+def continuous_dec_days(x):
+    x = x.values
+    first_value = x[0]
+    if first_value >= 0:
+        return 0
+    else:
+        res = np.where((x>0).astype(int).cumsum()==1)[0]
+        if res.shape[0] == 0:
+            return x.shape[0]
+        else:
+            return res[0]
+
+def continuous_inc_days(x):
+    x = x.values
+    first_value = x[0]
+    if first_value < 0:
+        return 0
+    else:
+        res =np.where((x>0).astype(int).cumsum() - np.arange(x.shape[0]) == 0)[0]
+        if res.shape[0] == 0:
+            return x.shape[0]
+        else:
+            return res[0]
+
+def get_continuous_days(data, col='pctChg'):
+    grouped_data = data.groupby('code')[col]
+    data = data.merge(grouped_data.apply(continuous_dec_days).reset_index().rename(columns={col:f'{col}_dec_days'}), on='code', how='left')
+    data = data.merge(grouped_data.apply(continuous_inc_days).reset_index().rename(columns={col:f'{col}_inc_days'}), on='code', how='left')
     return data
 
 
